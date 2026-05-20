@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
@@ -120,6 +122,16 @@ class CreatePurchaseOrderRequest(BaseModel):
     expected_delivery_date: str
     notes: Optional[str] = None
 
+class CreateOrderItem(BaseModel):
+    sku: str
+    name: str
+    quantity: int
+    unit_price: float
+
+class CreateOrderRequest(BaseModel):
+    items: List[CreateOrderItem]
+    lead_time_days: int
+
 # API endpoints
 @app.get("/")
 def root():
@@ -152,6 +164,29 @@ def get_orders(
     filtered_orders = apply_filters(orders, warehouse, category, status)
     filtered_orders = filter_by_month(filtered_orders, month)
     return filtered_orders
+
+@app.post("/api/orders", response_model=Order)
+def create_order(req: CreateOrderRequest):
+    """Create a new restocking order. Appends to the in-memory orders list."""
+    now = datetime.now()
+    order_id = str(len(orders) + 1)
+    expected = now + timedelta(days=req.lead_time_days)
+    total = sum(i.quantity * i.unit_price for i in req.items)
+    new_order = {
+        "id": order_id,
+        "order_number": f"ORD-{now.year}-{int(order_id):04d}",
+        "customer": "Internal Restock",
+        "items": [i.model_dump() for i in req.items],
+        "status": "Submitted",
+        "order_date": now.isoformat(timespec="seconds"),
+        "expected_delivery": expected.isoformat(timespec="seconds"),
+        "total_value": round(total, 2),
+        "actual_delivery": None,
+        "warehouse": None,
+        "category": None,
+    }
+    orders.append(new_order)
+    return new_order
 
 @app.get("/api/orders/{order_id}", response_model=Order)
 def get_order(order_id: str):
